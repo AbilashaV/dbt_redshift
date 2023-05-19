@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest import mock
 from unittest.mock import Mock, call
@@ -73,8 +74,20 @@ class TestRedshiftAdapter(unittest.TestCase):
             auto_create=False,
             db_groups=[],
             timeout=30,
+            application_name="dbt",
             region="us-east-1",
         )
+
+    @mock.patch("redshift_connector.connect", Mock())
+    def test_region_not_match(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="iam",
+            region="someregion",
+        )
+        with self.assertRaises(dbt.exceptions.FailedToConnectError) as context:
+            connect_method_factory = RedshiftConnectMethodFactory(self.config.credentials)
+            connect_method_factory.get_connect_method()
+        self.assertTrue("does not match with region" in context.exception.msg)
 
     @mock.patch("redshift_connector.connect", Mock())
     def test_explicit_database_conn(self):
@@ -91,6 +104,7 @@ class TestRedshiftAdapter(unittest.TestCase):
             auto_create=False,
             db_groups=[],
             region="us-east-1",
+            application_name="dbt",
             timeout=30,
         )
 
@@ -116,6 +130,7 @@ class TestRedshiftAdapter(unittest.TestCase):
             db_groups=[],
             profile=None,
             timeout=30,
+            application_name="dbt",
             port=5439,
         )
 
@@ -143,6 +158,7 @@ class TestRedshiftAdapter(unittest.TestCase):
             password="",
             user="",
             profile="test",
+            application_name="dbt",
             timeout=30,
             port=5439,
         )
@@ -169,6 +185,7 @@ class TestRedshiftAdapter(unittest.TestCase):
             password="",
             user="",
             profile="test",
+            application_name="dbt",
             timeout=30,
             port=5439,
         )
@@ -270,22 +287,202 @@ class TestRedshiftAdapter(unittest.TestCase):
         with self.assertRaises(dbt.exceptions.FailedToConnectError) as context:
             connection = self.adapter.acquire_connection("dummy")
             connection.handle
-            redshift_connector.connect.assert_called_once_with(
-                iam=True,
-                host="doesnotexist.1233.us-east-2.redshift-srvrlss.amazonaws.com",
-                database="redshift",
-                cluster_identifier=None,
-                region="us-east-2",
-                auto_create=False,
-                db_groups=[],
-                db_user="root",
-                password="",
-                user="",
-                profile="test",
-                port=5439,
-                timeout=30,
-            )
         self.assertTrue("'host' must be provided" in context.exception.msg)
+
+    @mock.patch("redshift_connector.connect", Mock())
+    @mock.patch("boto3.Session", Mock())
+    def test_azure_identity_plugin(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="IdP",
+            database="dev",
+            cluster_id="my-testing-cluster",
+            credentials_provider="AzureCredentialsProvider",
+            user="someuser@myazure.org",
+            password="somepassword",
+            azure_idp_tenant="my_idp_tenant",
+            azure_client_id="my_client_id",
+            azure_client_secret="my_client_secret",
+            region="us-east-1",
+            azure_preferred_role="arn:aws:iam:123:role/MyFirstDinnerRoll",
+            host=None,
+        )
+        connection = self.adapter.acquire_connection("dummy")
+        connection.handle
+        redshift_connector.connect.assert_called_once_with(
+            iam=True,
+            database="dev",
+            cluster_identifier="my-testing-cluster",
+            credentials_provider="AzureCredentialsProvider",
+            user="someuser@myazure.org",
+            password="somepassword",
+            idp_tenant="my_idp_tenant",
+            client_id="my_client_id",
+            client_secret="my_client_secret",
+            preferred_role="arn:aws:iam:123:role/MyFirstDinnerRoll",
+            region="us-east-1",
+        )
+
+    @mock.patch("redshift_connector.connect", Mock())
+    @mock.patch("boto3.Session", Mock())
+    def test_azure_no_region(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="IdP",
+            database="dev",
+            cluster_id="my-testing-cluster",
+            credentials_provider="AzureCredentialsProvider",
+            user="someuser@myazure.org",
+            password="somepassword",
+            azure_idp_tenant="my_idp_tenant",
+            azure_client_id="my_client_id",
+            azure_client_secret="my_client_secret",
+            azure_preferred_role="arn:aws:iam:123:role/MyFirstDinnerRoll",
+        )
+        with self.assertRaises(FailedToConnectError) as context:
+            connect_method_factory = RedshiftConnectMethodFactory(self.config.credentials)
+            connect_method_factory.get_connect_method()
+        self.assertTrue("'region' must be provided" in context.exception.msg)
+
+    @mock.patch("redshift_connector.connect", Mock())
+    def test_idp_identity_no_provider(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="IdP",
+        )
+        with self.assertRaises(FailedToConnectError) as context:
+            connect_method_factory = RedshiftConnectMethodFactory(self.config.credentials)
+            connect_method_factory.get_connect_method()
+        self.assertTrue("credentials_provider" in context.exception.msg)
+
+    @mock.patch("redshift_connector.connect", Mock())
+    @mock.patch("boto3.Session", Mock())
+    def test_okta_identity_plugin(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="IdP",
+            database="dev",
+            cluster_id="my-testing-cluster",
+            credentials_provider="OktaCredentialsProvider",
+            user="someuser@myazure.org",
+            password="somepassword",
+            okta_idp_host="my_idp_host",
+            okta_app_id="my_first_appetizer",
+            okta_app_name="dinner_party",
+            region="us-east-1",
+            host=None,
+        )
+        connection = self.adapter.acquire_connection("dummy")
+        connection.handle
+        redshift_connector.connect.assert_called_once_with(
+            iam=True,
+            database="dev",
+            cluster_identifier="my-testing-cluster",
+            credentials_provider="OktaCredentialsProvider",
+            user="someuser@myazure.org",
+            password="somepassword",
+            idp_host="my_idp_host",
+            app_id="my_first_appetizer",
+            app_name="dinner_party",
+            region="us-east-1",
+        )
+
+    @mock.patch("redshift_connector.connect", Mock())
+    @mock.patch("boto3.Session", Mock())
+    def test_idp_spelling_error(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="IdP",
+            database="dev",
+            cluster_id="my-testing-cluster",
+            credentials_provider="oktaar",
+            user="someuser@myazure.org",
+            password="somepassword",
+            okta_idp_host="my_idp_host",
+            okta_app_id="my_first_appetizer",
+            okta_app_name="dinner_party",
+            region="us-east-1",
+            host=None,
+        )
+        with self.assertRaises(FailedToConnectError) as context:
+            connect_method_factory = RedshiftConnectMethodFactory(self.config.credentials)
+            connect_method_factory.get_connect_method()
+        self.assertTrue("Unrecognized" in context.exception.msg)
+
+    @mock.patch("redshift_connector.connect", Mock())
+    @mock.patch("boto3.Session", Mock())
+    def test_okta_case_sensitivity(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="IdP",
+            database="dev",
+            cluster_id="my-testing-cluster",
+            credentials_provider="oKtA",
+            user="someuser@myazure.org",
+            password="somepassword",
+            okta_idp_host="my_idp_host",
+            okta_app_id="my_first_appetizer",
+            okta_app_name="dinner_party",
+            region="us-east-1",
+            host=None,
+        )
+        connection = self.adapter.acquire_connection("dummy")
+        connection.handle
+        redshift_connector.connect.assert_called_once_with(
+            iam=True,
+            database="dev",
+            cluster_identifier="my-testing-cluster",
+            credentials_provider="OktaCredentialsProvider",
+            user="someuser@myazure.org",
+            password="somepassword",
+            idp_host="my_idp_host",
+            app_id="my_first_appetizer",
+            app_name="dinner_party",
+            region="us-east-1",
+        )
+
+    @mock.patch("redshift_connector.connect", Mock())
+    @mock.patch.dict(
+        os.environ,
+        {
+            "AWS_ACCESS_KEY_ID": "someid",
+            "AWS_SECRET_ACCESS_KEY": "somekey",
+            "AWS_SESSION_TOKEN": "somekey",
+        },
+    )
+    @mock.patch("boto3.Session", Mock())
+    def test_auth_profile_connect_success(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="auth_profile",
+            auth_profile="testprofile",
+            database="",
+            user="",
+            region="us-east-1",
+            host=None,
+        )
+        connection = self.adapter.acquire_connection("dummy")
+        connection.handle
+        redshift_connector.connect.assert_called_once_with(
+            iam=True,
+            access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            session_token=os.environ["AWS_SESSION_TOKEN"],
+            db_user="",
+            auth_profile="testprofile",
+            port=5439,
+            auto_create=False,
+            db_groups=[],
+            database="",
+            region="us-east-1",
+            application_name="dbt",
+            host=None,
+            timeout=30,
+        )
+
+    @mock.patch("redshift_connector.connect", Mock())
+    def test_auth_profile_no_profile(self):
+        self.config.credentials = self.config.credentials.replace(
+            method="auth_profile",
+            auth_profile="",
+        )
+        with self.assertRaises(FailedToConnectError) as context:
+            connect_method_factory = RedshiftConnectMethodFactory(self.config.credentials)
+            connect_method_factory.get_connect_method()
+        self.assertTrue("'auth_profile' must be provided" in context.exception.msg)
 
     def test_iam_conn_optionals(self):
         profile_cfg = {
