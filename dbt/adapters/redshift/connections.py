@@ -149,6 +149,7 @@ class RedshiftCredentials(Credentials):
     role: Optional[str] = None
     sslmode: Optional[UserSSLMode] = field(default_factory=UserSSLMode.default)
     retries: int = 1
+    query_tag: Optional[str] = None
     region: Optional[str] = None  # if not provided, will be determined from host
     # opt-in by default per team deliberation on https://peps.python.org/pep-0249/#autocommit
     autocommit: Optional[bool] = True
@@ -170,6 +171,7 @@ class RedshiftCredentials(Credentials):
             "iam_profile",
             "schema",
             "sslmode",
+            "query_tag",
             "region",
             "sslmode",
             "region",
@@ -253,6 +255,10 @@ class RedshiftConnectMethodFactory:
                     c.autocommit = True
                 if self.credentials.role:
                     c.cursor().execute("set role {}".format(self.credentials.role))
+                if self.credentials.query_tag:
+                    c.cursor().execute(
+                        "set query_group to '{}'".format(self.credentials.query_tag)
+                    )
                 return c
 
         elif method == RedshiftConnectionMethod.IAM:
@@ -277,6 +283,10 @@ class RedshiftConnectMethodFactory:
                     c.autocommit = True
                 if self.credentials.role:
                     c.cursor().execute("set role {}".format(self.credentials.role))
+                if self.credentials.query_tag:
+                    c.cursor().execute(
+                        "set query_group to '{}'".format(self.credentials.query_tag)
+                    )
                 return c
 
         else:
