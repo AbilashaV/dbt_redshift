@@ -580,6 +580,18 @@ class TestRedshiftAdapter(unittest.TestCase):
         mock_handle.return_value = mock_cursor
         return mock_cursor
 
+    @mock.patch("dbt.adapters.redshift.impl.RedshiftAdapter._get_cursor")
+    def test_list_schemas(self, mock_cursor):
+        mock_cursor.return_value.get_schemas.return_value = ["schema1"], ["schema2"]
+        results = self.adapter.list_schemas(database="somedb", schema="someschema")
+        self.assertTrue(results == ["schema1", "schema2"])
+
+    @mock.patch("dbt.adapters.redshift.impl.RedshiftAdapter.list_schemas")
+    def test_check_schema_exists(self, mock_list_schemas):
+        mock_list_schemas.return_value = ["schema1", "schema2"]
+        results = self.adapter.check_schema_exists(database="somedb", schema="someschema")
+        self.assertTrue(results is True)
+
 
 class TestRedshiftAdapterConversions(TestAdapterConversions):
     def test_convert_text_type(self):

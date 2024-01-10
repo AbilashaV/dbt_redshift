@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Optional, Set, Any, Dict, Type
+from typing import Optional, Set, Any, Dict, Type, List
 from collections import namedtuple
 from dbt.adapters.base import PythonJobHelper
 from dbt.adapters.base.impl import AdapterConfig, ConstraintSupport
@@ -121,6 +121,21 @@ class RedshiftAdapter(SQLAdapter):
 
     def timestamp_add_sql(self, add_to: str, number: int = 1, interval: str = "hour") -> str:
         return f"{add_to} + interval '{number} {interval}'"
+
+    def _get_cursor(self):
+        return self.connections.get_thread_connection().handle.cursor()
+
+    def list_schemas(self, database: str, schema: Optional[str] = None) -> List[str]:
+        cursor = self._get_cursor()
+        results = []
+        for s in cursor.get_schemas(catalog=database, schema_pattern=schema):
+            results.append(s[0])
+        return results
+
+    @available
+    def check_schema_exists(self, database: str, schema: str) -> bool:
+        results = self.list_schemas(database=database, schema=schema)
+        return len(results) > 0
 
     def _link_cached_database_relations(self, schemas: Set[str]):
         """

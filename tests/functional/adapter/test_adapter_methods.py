@@ -16,6 +16,30 @@ select 1 as id limit {{ limit_query }}
 
 """
 
+models__get_invalid_schema = """
+
+{% set upstream = ref('upstream') %}
+
+{% set existing = adapter.check_schema_exists(upstream.database, "doesnotexist") %}
+{% if existing == False %}
+select 2 as id
+{% else %}
+select 1 as id
+{% endif %}
+"""
+
+models__get_valid_schema = """
+
+{% set upstream = ref('upstream') %}
+
+{% set existing = adapter.check_schema_exists(upstream.database, upstream.schema) %}
+{% if existing == True %}
+select 2 as id
+{% else %}
+select 1 as id
+{% endif %}
+"""
+
 models__upstream_sql = """
 select 1 as id
 
@@ -84,6 +108,9 @@ class RedshiftAdapterMethod:
             "base_view.sql": "{{ config(bind=True) }} select * from {{ ref('model') }}",
             "get_relation_type.sql": models__get_relation_type,
             "expected_type.sql": "select 1 as valid_type",
+            "get_invalid_schema.sql": models__get_invalid_schema,
+            "get_valid_schema.sql": models__get_invalid_schema,
+            "get_schema_expected.sql": "select 2 as id",
         }
 
     def project_files(
@@ -104,11 +131,13 @@ class RedshiftAdapterMethod:
     def test_adapter_methods(self, project):
         run_dbt(["compile"])  # trigger any compile-time issues
         result = run_dbt()
-        assert len(result) == 7
+        assert len(result) == 10
 
         run_dbt(["test"])
         check_relations_equal(project.adapter, ["call_get_relation", "expected"])
         check_relations_equal(project.adapter, ["get_relation_type", "expected_type"])
+        check_relations_equal(project.adapter, ["get_invalid_schema", "get_schema_expected"])
+        check_relations_equal(project.adapter, ["get_valid_schema", "get_schema_expected"])
 
 
 class TestRedshiftAdapterMethod(RedshiftAdapterMethod):
