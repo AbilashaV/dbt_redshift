@@ -59,7 +59,7 @@ class RedshiftRelation(BaseRelation):
         return MAX_CHARACTERS_IN_IDENTIFIER
 
     @classmethod
-    def from_config(cls, config: RelationConfig) -> RelationConfigBase:
+    def from_relation_config(cls, config: RelationConfig) -> RelationConfigBase:
         relation_type: str = config.config.materialized  # type: ignore
 
         if relation_config := cls.relation_configs.get(relation_type):
