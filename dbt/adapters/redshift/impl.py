@@ -6,6 +6,7 @@ from collections import namedtuple
 from dbt.adapters.base import PythonJobHelper
 from dbt.adapters.base.impl import AdapterConfig, ConstraintSupport
 from dbt.adapters.base.meta import available
+from dbt.adapters.base.column import Column
 from dbt.adapters.sql import SQLAdapter
 from dbt.adapters.contracts.connection import AdapterResponse
 from dbt.adapters.events.logging import AdapterLogger
@@ -121,6 +122,31 @@ class RedshiftAdapter(SQLAdapter):
 
     def timestamp_add_sql(self, add_to: str, number: int = 1, interval: str = "hour") -> str:
         return f"{add_to} + interval '{number} {interval}'"
+
+    def _get_cursor(self):
+        return self.connections.get_thread_connection().handle.cursor()
+
+    def get_columns_in_relation(self, relation):
+        cursor = self._get_cursor()
+        if columns := cursor.get_columns(
+            catalog=relation.database,
+            schema_pattern=relation.schema,
+            tablename_pattern=relation.identifier,
+        ):
+            results = []
+            CHAR_TYPES = {1, 12}
+            NUMERIC_TYPES = {5, 4, -5, 3, 7, 8, 6, 2, 2003}
+            for column in columns:
+                _, _, _, name, dtype_number, dtype_name, size, _, numeric_precision, *_ = column
+                if dtype_number in CHAR_TYPES:
+                    results.append(Column(name, dtype_name, size, None, None))  # if
+                elif dtype_number in NUMERIC_TYPES:
+                    results.append(Column(name, dtype_name, None, size, numeric_precision))
+                else:
+                    results.append(Column(name, dtype_name, size, None, None))
+        else:
+            results = []
+        return results
 
     def _link_cached_database_relations(self, schemas: Set[str]):
         """
