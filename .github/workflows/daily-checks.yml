@@ -1,0 +1,40 @@
+# **what?**
+# - run scheduled CI on protected branches
+# - post a failure message in #dev-adapter-alerts for failures
+#
+# **why?**
+# - ensure release branches are always shippable
+# - raise awareness of dependencies shifting beneath us
+#
+# **when?**
+# - daily at 5:00 AM UTC
+# - manually
+name: "Daily checks"
+
+on:
+    schedule:
+    -   cron: 0 5 * * *
+    workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+    ci-test-suite:
+        name: "CI test suite"
+        uses: ./.github/workflows/ci-test-suite.yml
+        with:
+            ref: "main"
+
+    post-failure:
+        runs-on: ubuntu-latest
+        needs: test
+        if: ${{ failure() }}
+        steps:
+        -   name: Posting scheduled run failures
+            uses: ravsamhq/notify-slack-action@v2
+            if: ${{ github.event_name == 'schedule' }}
+            with:
+                  notification_title: 'Redshift nightly integration test failed'
+                  status: ${{ job.status }}
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEV_ADAPTER_ALERTS }}

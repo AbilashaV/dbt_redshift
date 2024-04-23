@@ -1,0 +1,29 @@
+# **what?**
+# - run CI on all PRs against protected branches
+#
+# **why?**
+# - ensure code is verified prior to being merged into a protected branch
+#
+# **when?**
+# - a PR is opened against a protected branch
+# - code is pushed to a PR against a protected branch
+name: "Pull request checks"
+
+on:
+    pull_request_target:
+        types:
+        -   opened
+        -   synchronize
+
+permissions: read-all
+
+concurrency:
+    group: "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.head.ref }}"
+    cancel-in-progress: true
+
+jobs:
+    ci-test-suite:
+        name: "CI test suite"
+        uses: ./.github/workflows/ci-test-suite.yml
+        with:
+            ref: ${{ github.event.pull_request.head.ref }}

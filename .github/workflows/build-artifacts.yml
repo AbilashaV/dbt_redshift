@@ -1,0 +1,44 @@
+name: "Build artifacts"
+
+on:
+    workflow_call:
+        inputs:
+            ref:
+                description: "The branch/tag/commit to run integration tests on"
+                type: string
+                required: true
+            archive-name:
+                description: "Name of the archive for build artifacts, used during a release"
+                type: string
+                default: ""
+
+permissions: read-all
+
+concurrency:
+    group: "${{ github.workflow }}-${{ github.event_name }}-${{ inputs.ref }}"
+    cancel-in-progress: true
+
+jobs:
+    build-artifacts:
+        name: "Build artifacts"
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                python-version: ${{ fromJSON(vars.DBT_PYTHON_VERSIONS) }}
+        steps:
+        -   name: "Check out ${{ github.repository }}@${{ inputs.ref }}"
+            uses: actions/checkout@v4
+            with:
+                ref: ${{ inputs.ref }}
+                persist-credentials: false
+
+        -   name: "Setup environment"
+            uses: dbt-labs/actions/hatch/environment/create@add-hatch-actions
+            with:
+                python-version: ${{ matrix.python-version }}
+
+        -   name: "Build artifacts"
+            uses: dbt-labs/actions/hatch/artifacts/create.yml@add-hatch-actions
+            with:
+                archive-name: ${{ inputs.archive-name }}

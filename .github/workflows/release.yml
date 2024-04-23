@@ -13,216 +13,216 @@
 #
 # **when?**
 # This workflow can be run manually on demand or can be called by other workflows
-name: Release to GitHub and PyPI
+name: "Release pipeline"
+run-name: "Release `${{ inputs.version }}` to `${{ inputs.deploy-environment }}`"
 
 on:
-  workflow_dispatch:
-    inputs:
-      sha:
-        description: "The last commit sha in the release"
-        type: string
-        required: true
-      target_branch:
-        description: "The branch to release from"
-        type: string
-        required: true
-      version_number:
-        description: "The release version number (i.e. 1.0.0b1)"
-        type: string
-        required: true
-      build_script_path:
-        description: "Build script path"
-        type: string
-        default: "scripts/build-dist.sh"
-        required: true
-      env_setup_script_path:
-        description: "Environment setup script path"
-        type: string
-        default: "scripts/env-setup.sh"
-        required: false
-      s3_bucket_name:
-        description: "AWS S3 bucket name"
-        type: string
-        default: "core-team-artifacts"
-        required: true
-      package_test_command:
-        description: "Package test command"
-        type: string
-        default: "python -c \"import dbt.adapters.redshift\""
-        required: true
-      test_run:
-        description: "Test run (Publish release as draft)"
-        type: boolean
-        default: true
-        required: false
-      nightly_release:
-        description: "Nightly release to dev environment"
-        type: boolean
-        default: false
-        required: false
-  workflow_call:
-    inputs:
-      sha:
-        description: "The last commit sha in the release"
-        type: string
-        required: true
-      target_branch:
-        description: "The branch to release from"
-        type: string
-        required: true
-      version_number:
-        description: "The release version number (i.e. 1.0.0b1)"
-        type: string
-        required: true
-      build_script_path:
-        description: "Build script path"
-        type: string
-        default: "scripts/build-dist.sh"
-        required: true
-      env_setup_script_path:
-        description: "Environment setup script path"
-        type: string
-        default: "scripts/env-setup.sh"
-        required: false
-      s3_bucket_name:
-        description: "AWS S3 bucket name"
-        type: string
-        default: "core-team-artifacts"
-        required: true
-      package_test_command:
-        description: "Package test command"
-        type: string
-        default: "python -c \"import dbt.adapters.redshift\""
-        required: true
-      test_run:
-        description: "Test run (Publish release as draft)"
-        type: boolean
-        default: true
-        required: false
-      nightly_release:
-        description: "Nightly release to dev environment"
-        type: boolean
-        default: false
-        required: false
+    workflow_call:
+        inputs:
+            sha:
+                description: "The commit sha to release"
+                type: string
+                required: true
+            branch:
+                description: "The branch to release from"
+                type: string
+                default: "main"
+            version:
+                description: "The release version (e.g. 1.0.0b1)"
+                type: string
+                required: true
+            deploy-environment:
+                description: "Where to publish"
+                type: string
+                default: "prod"
+            publish-slack-override:
+                description: "Use to publish a Slack notification for non-prod deploy environments"
+                type: boolean
+                default: false
+    workflow_dispatch:
+        inputs:
+            sha:
+                description: "The commit sha to release"
+                type: string
+                required: true
+            branch:
+                description: "The branch to release from"
+                type: string
+                default: "main"
+            version:
+                description: "The release version (e.g. 1.0.0b1)"
+                type: string
+                required: true
+            deploy-environment:
+                description: "Where to publish"
+                type: environment
+            publish-slack-override:
+                description: "Use to publish a Slack notification for non-prod deploy environments"
+                type: boolean
+                default: false
 
+# this is the permission that allows creating a new release to both GitHub and PyPI
 permissions:
-  contents: write # this is the permission that allows creating a new release
+    contents: write
+    id-token: write
 
-defaults:
-  run:
-    shell: bash
+# deploying the same version of a package to the same environment should override any previous deployment with those attributes
+concurrency:
+    group: "${{ github.workflow }}-${{ inputs.version }}-${{ inputs.deploy-environment }}"
+    cancel-in-progress: true
 
 jobs:
-  log-inputs:
-    name: Log Inputs
-    runs-on: ubuntu-latest
-    steps:
-      - name: "[DEBUG] Print Variables"
-        run: |
-          echo The last commit sha in the release: ${{ inputs.sha }}
-          echo The branch to release from:         ${{ inputs.target_branch }}
-          echo The release version number:         ${{ inputs.version_number }}
-          echo Build script path:                  ${{ inputs.build_script_path }}
-          echo Environment setup script path:      ${{ inputs.env_setup_script_path }}
-          echo AWS S3 bucket name:                 ${{ inputs.s3_bucket_name }}
-          echo Package test command:               ${{ inputs.package_test_command }}
-          echo Test run:                           ${{ inputs.test_run }}
-          echo Nightly release:                    ${{ inputs.nightly_release }}
+    release-inputs:
+        name: "Release inputs"
+        runs-on: ubuntu-latest
+        outputs:
+            archive-name: ${{ steps.computed-inputs.outputs.archive-name }}
+        steps:
+        -   name: "Set: archive name"
+            id: archive
+            shell: bash
+            run: |
+              archive_name=${{ inputs.package }}-${{ inputs.version_number }}-${{ inputs.deploy-environment }}
+              echo "name=$archive_name" >> $GITHUB_OUTPUT
 
-  bump-version-generate-changelog:
-    name: Bump package version, Generate changelog
+        -   name: "[DEBUG] Inputs"
+            shell: bash
+            run: |
+                echo branch              : ${{ inputs.branch }}
+                echo package             : ${{ inputs.package }}
+                echo version             : ${{ inputs.version }}
+                echo deploy-environment  : ${{ inputs.deploy-environment }}
+                echo archive-name        : ${{ steps.archive.outputs.name }}
+                echo dbt-adapters-branch : ${{ inputs.dbt-adapters-branch }}
+                echo dbt-common-branch   : ${{ inputs.dbt-common-branch }}
+                echo dbt-core-branch     : ${{ inputs.dbt-core-branch }}
 
-    uses: dbt-labs/dbt-release/.github/workflows/release-prep.yml@main
+    release-branch:
+        name: "Create a release branch"
+        needs: release-inputs
+        runs-on: ubuntu-latest
+        outputs:
+            branch: ${{ steps.branch.outputs.branch-name }}
+        steps:
+        -   name: "Checkout `${{ inputs.branch }}`"
+            uses: actions/checkout@v4
+            with:
+                ref: ${{ inputs.branch }}
 
-    with:
-      sha: ${{ inputs.sha }}
-      version_number: ${{ inputs.version_number }}
-      target_branch: ${{ inputs.target_branch }}
-      env_setup_script_path: ${{ inputs.env_setup_script_path }}
-      test_run: ${{ inputs.test_run }}
-      nightly_release: ${{ inputs.nightly_release }}
+        -   name: "Create release branch"
+            id: branch
+            uses: dbt-labs/actions/github/branch/create@add-hatch-actions
+            with:
+                branch-group: "release/${{ inputs.version }}"
 
-    secrets: inherit
+        -   name: "Bump version"
+            uses: dbt-labs/actions/hatch/version/build.yml@add-hatch-actions
+            with:
+                branch: ${{ needs.release-branch.outputs.branch }}
+                version: ${{ inputs.version }}
 
-  log-outputs-bump-version-generate-changelog:
-    name: "[Log output] Bump package version, Generate changelog"
-    if: ${{ !failure() && !cancelled() }}
+        -   name: "Generate a new changelog"
+            uses: dbt-labs/actions/changie/changelog/create.yml@add-hatch-actions
+            with:
+                branch: ${{ needs.release-branch.outputs.branch }}
+                version: ${{ inputs.version }}
 
-    needs: [bump-version-generate-changelog]
+    ci-test-suite:
+        name: "Run code quality, unit tests, and integration tests, and build artifacts"
+        needs:
+        -   release-inputs
+        -   release-branch
+        uses: ./.github/workflows/ci-test-suite.yml
+        with:
+            ref: ${{ needs.release-branch.outputs.branch }}
+            archive-name: ${{ needs.release-inputs.outputs.archive-name }}
 
-    runs-on: ubuntu-latest
+    merge-changes:
+        name: "Merge the version bump and changelog updates"
+        needs:
+        -   ci-test-suite
+        -   release-branch
+        runs-on: ubuntu-latest
+        outputs:
+            sha: ${{ steps.merge.outputs.sha }} || ${{ steps.merge-test.outputs.sha }} )
+        steps:
+        -   name: "Checkout `${{ needs.release-branch.outputs.branch }}`"
+            uses: actions/checkout@v4
+            with:
+                ref: ${{ needs.release-branch.outputs.branch }}
 
-    steps:
-      - name: Print variables
-        run: |
-          echo Final SHA     : ${{ needs.bump-version-generate-changelog.outputs.final_sha }}
-          echo Changelog path: ${{ needs.bump-version-generate-changelog.outputs.changelog_path }}
+        -   name: "Merge `${{ needs.release-branch.outputs.branch }}` into `${{ inputs.branch }}`"
+            if: ${{ inputs.deploy-environment == 'prod' }}
+            id: merge
+            uses: dbt-labs/actions/github/branch/merge@add-hatch-actions
+            with:
+                source-branch: ${{ needs.release-branch.outputs.branch }}
+                target-branch: ${{ inputs.branch }}
+                message: "merge {source_ref} into {target_branch} for a release"
 
-  build-test-package:
-    name: Build, Test, Package
-    if: ${{ !failure() && !cancelled() }}
-    needs: [bump-version-generate-changelog]
+        -   name: "Get HEAD SHA for test release"
+            id: merge-test
+            if: ${{ !(inputs.deploy-environment == 'prod') }}
+            shell: bash
+            run: |
+                git pull
+                echo "sha=$(git rev-parse HEAD)" >> $GITHUB_OUTPUT
 
-    uses: dbt-labs/dbt-release/.github/workflows/build.yml@main
+    publish-github:
+        name: "Publish to GitHub"
+        if: ${{ !failure() && !cancelled() }}
+        needs:
+        -   release-inputs
+        -   changelog
+        -   merge-changes
+        uses: dbt-labs/actions/.github/workflows/publish-github.yml@add-hatch-actions
+        with:
+            archive-name: ${{ needs.release-inputs.outputs.archive-name }}
+            version: ${{ inputs.version }}
+            deploy-environment: ${{ inputs.deploy-environment }}
+            sha: ${{ needs.merge-changes.outputs.sha }}
+            changelog-path: ${{ needs.changelog.outputs.changelog-path }}
 
-    with:
-      sha: ${{ needs.bump-version-generate-changelog.outputs.final_sha }}
-      version_number: ${{ inputs.version_number }}
-      changelog_path: ${{ needs.bump-version-generate-changelog.outputs.changelog_path }}
-      build_script_path: ${{ inputs.build_script_path }}
-      s3_bucket_name: ${{ inputs.s3_bucket_name }}
-      package_test_command: ${{ inputs.package_test_command }}
-      test_run: ${{ inputs.test_run }}
-      nightly_release: ${{ inputs.nightly_release }}
+    publish-pypi:
+        name: "Publish to PyPI"
+        needs: merge-changes
+        if: ${{ !failure() && !cancelled() }}
+        environment:
+            name: ${{ inputs.deploy-environment }}
+            url: ${{ vars.PYPI_PROJECT_URL }}
+        runs-on: ubuntu-latest
+        steps:
+        -   name: "Publish to PyPI"
+            uses: dbt-labs/actions/pypi/release/create
+            with:
+              archive-name: ${{ inputs.archive-name }}
+              index-url: ${{ vars.PYPI_REPOSITORY_URL }}
 
-    secrets:
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    publish-pypi-internal:
+        name: "Publish to internal PyPI"
+        if: ${{ !failure() && !cancelled() }}
+        needs: merge-changes
+        uses: dbt-labs/dbt-release/.github/workflows/internal-archive-release.yml@main
+        with:
+            version_number: "${{ inputs.version }}"
+            package_test_command: "python -c \"import dbt.adapters.redshift\""
+            dbms_name: "redshift"
+            ref: ${{ needs.merge-changes.outputs.sha }}
+        secrets: inherit
 
-  github-release:
-    name: GitHub Release
-    if: ${{ !failure() && !cancelled() }}
-
-    needs: [bump-version-generate-changelog, build-test-package]
-
-    uses: dbt-labs/dbt-release/.github/workflows/github-release.yml@main
-
-    with:
-      sha: ${{ needs.bump-version-generate-changelog.outputs.final_sha }}
-      version_number: ${{ inputs.version_number }}
-      changelog_path: ${{ needs.bump-version-generate-changelog.outputs.changelog_path }}
-      test_run: ${{ inputs.test_run }}
-
-  pypi-release:
-    name: PyPI Release
-
-    needs: [github-release]
-
-    uses: dbt-labs/dbt-release/.github/workflows/pypi-release.yml@main
-
-    with:
-      version_number: ${{ inputs.version_number }}
-      test_run: ${{ inputs.test_run }}
-
-    secrets:
-      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
-      TEST_PYPI_API_TOKEN: ${{ secrets.TEST_PYPI_API_TOKEN }}
-
-  slack-notification:
-    name: Slack Notification
-    if: ${{ failure() && (!inputs.test_run || inputs.nightly_release) }}
-
-    needs:
-      [
-        bump-version-generate-changelog,
-        build-test-package,
-        github-release,
-        pypi-release,
-      ]
-
-    uses: dbt-labs/dbt-release/.github/workflows/slack-post-notification.yml@main
-    with:
-      status: "failure"
-
-    secrets:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEV_ADAPTER_ALERTS }}
+    slack-notification:
+        name: "Slack notification"
+        if: >-
+            failure() &&
+            (
+                inputs.deploy-environment == 'prod' ||
+                inputs.publish-slack-override
+            )
+        needs:
+        -   github-release
+        -   pypi-release
+        uses: dbt-labs/dbt-release/.github/workflows/slack-post-notification.yml@main
+        with:
+            status: "failure"
+        secrets:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEV_ADAPTER_ALERTS }}
